@@ -51,16 +51,34 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
     private val labels = listOf("View", "ImageView", "Text", "Line")
 
     private val llmInference: LlmInference by lazy {
-        Log.d(TAG, "Initializing LlmInference Engine...")
         val modelFile = File(context.cacheDir, GEMMA_TASK_FILE)
-        val modelPath = modelFile.absolutePath
-        val options = LlmInference.LlmInferenceOptions.builder()
-            .setModelPath(modelPath)
-            .setMaxNumImages(1)
-            .setMaxTokens(4096)
-            .setPreferredBackend(LlmInference.Backend.GPU)
-            .build()
-        LlmInference.createFromOptions(context, options)
+        check(modelFile.exists()) {
+            "Gemma task file is missing at ${modelFile.absolutePath}. Copy the .task file to the app cache directory."
+        }
+
+        val attemptedBackends = listOf(
+            LlmInference.Backend.GPU,
+            LlmInference.Backend.CPU,
+        )
+
+        var lastError: Throwable? = null
+        for (backend in attemptedBackends) {
+            try {
+                Log.d(TAG, "Initializing LlmInference Engine using $backend backend...")
+                val options = LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelFile.absolutePath)
+                    .setMaxNumImages(1)
+                    .setMaxTokens(4096)
+                    .setPreferredBackend(backend)
+                    .build()
+                return@lazy LlmInference.createFromOptions(context, options)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to initialize LlmInference on $backend backend", e)
+                lastError = e
+            }
+        }
+
+        throw IllegalStateException("Unable to initialize LlmInference engine with available backends", lastError)
     }
 
     private val yoloInterpreter: Interpreter by lazy {

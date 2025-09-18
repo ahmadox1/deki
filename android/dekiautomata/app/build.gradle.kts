@@ -31,8 +31,14 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-        // TODO update
-        buildConfigField("String", "API_TOKEN", "\"${getLocalProperty("API_TOKEN", rootDir)}\"")
+        val defaultBaseUrl = "http://10.0.2.2:8000/"
+        val configuredBaseUrl = getLocalProperty("BASE_URL", rootDir).ifBlank { defaultBaseUrl }
+        val normalizedBaseUrl = if (configuredBaseUrl.endsWith("/")) configuredBaseUrl else "$configuredBaseUrl/"
+        buildConfigField("String", "BASE_URL", "\"$normalizedBaseUrl\"")
+
+        val defaultApiToken = "local_dev_token"
+        val configuredToken = getLocalProperty("API_TOKEN", rootDir).ifBlank { defaultApiToken }
+        buildConfigField("String", "API_TOKEN", "\"$configuredToken\"")
     }
 
     buildTypes {

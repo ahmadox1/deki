@@ -20,8 +20,37 @@ from utils.pills import preprocess_image
 import logging
 import tempfile
 import uuid
+from typing import Optional
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+
+def load_env_file(file_path: str = ".env") -> None:
+    """Populate os.environ with key/value pairs from a .env style file.
+
+    The helper is intentionally lightweight to avoid introducing a dependency
+    on python-dotenv while still allowing developers to configure the server
+    without exporting environment variables manually.
+    """
+
+    if not os.path.exists(file_path):
+        return
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                os.environ.setdefault(key, value)
+    except Exception:
+        logging.exception("Failed to read environment variables from %s", file_path)
+
+
+load_env_file()
 
 app = FastAPI(title="deki-automata API")
 
@@ -49,19 +78,23 @@ def with_semaphore(timeout: float = 20):
         return wrapper
     return decorator
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-API_TOKEN = os.environ.get("API_TOKEN")
+DEFAULT_API_TOKEN = "local_dev_token"
 
-if not OPENAI_API_KEY or not API_TOKEN:
-    logging.error("OPENAI_API_KEY and API_TOKEN must be set in environment variables.")
-    raise RuntimeError("OPENAI_API_KEY and API_TOKEN must be set in environment variables.")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+API_TOKEN = os.environ.get("API_TOKEN", DEFAULT_API_TOKEN).strip() or DEFAULT_API_TOKEN
 
-openai.api_key = OPENAI_API_KEY
+if not OPENAI_API_KEY:
+    logging.warning(
+        "OPENAI_API_KEY environment variable is not set. Endpoints that rely on the "
+        "OpenAI API (such as /action and /generate) will be disabled until the key is provided."
+    )
+else:
+    openai.api_key = OPENAI_API_KEY
 
 GLOBAL_SR = None
 GLOBAL_READER = None
 GLOBAL_SPELL = None
-LLM_CLIENT = None
+LLM_CLIENT: Optional[OpenAI] = None
 
 os.makedirs("./res", exist_ok=True)
 os.makedirs("./result", exist_ok=True)
@@ -108,10 +141,22 @@ def load_models():
     # EasyOCR + SpellChecker
     logging.info("Loading OCR + SpellChecker ...")
     start_time = time.perf_counter()
-    GLOBAL_READER = easyocr.Reader(['en'], gpu=True)
+    prefer_gpu = os.environ.get("EASYOCR_GPU", "auto").lower()
+    gpu_requested = prefer_gpu not in {"0", "false", "no", "cpu"}
+
+    try:
+        GLOBAL_READER = easyocr.Reader(['en'], gpu=gpu_requested)
+    except Exception as gpu_error:
+        if gpu_requested:
+            logging.warning("Falling back to CPU EasyOCR reader: %s", gpu_error)
+        GLOBAL_READER = easyocr.Reader(['en'], gpu=False)
+
     GLOBAL_SPELL = SpellChecker()
     logging.info(f"OCR + SpellChecker init took {time.perf_counter()-start_time:.3f}s.")
-    LLM_CLIENT = OpenAI()
+    if OPENAI_API_KEY:
+        LLM_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+    else:
+        LLM_CLIENT = None
 
 class ActionRequest(BaseModel):
     image: str  # Base64-encoded image
@@ -233,6 +278,12 @@ async def action(request: ActionRequest, token: str = Depends(verify_token)):
     start_time = time.perf_counter()
     logging.info("action endpoint start")
     log_request_data(request, "/action")
+
+    if LLM_CLIENT is None:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key is not configured on the server. Set the OPENAI_API_KEY environment variable to enable this endpoint.",
+        )
 
     action_step_history = request.history
     action_step_count = len(action_step_history)
@@ -387,6 +438,12 @@ async def generate(request: ActionRequest, token: str = Depends(verify_token)):
     start_time = time.perf_counter()
     logging.info("generate endpoint start")
     log_request_data(request, "/generate")
+
+    if LLM_CLIENT is None:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key is not configured on the server. Set the OPENAI_API_KEY environment variable to enable this endpoint.",
+        )
 
     with tempfile.TemporaryDirectory() as temp_dir:
         request_id = str(uuid.uuid4())

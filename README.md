@@ -83,11 +83,50 @@ And don't forget to include your HuggingFace and OpenAI tokens if you use blip2 
 Also, to use this version you need to install llama-3.2-11b via ollama.  
 (if you didn't pass --no-captioning)
 
-You can see an example of usage for the **code generation** (and for other things) 
+You can see an example of usage for the **code generation** (and for other things)
 in gradio section.
 
 If you want a production ready code generator or AI agent then fine-tune the model to get
 high quality results because the image description is quite long and complex.
+
+---
+
+## Backend configuration
+
+1. Copy the sample environment file and adjust it to your setup:
+   ```bash
+   cp .env.example .env
+   ```
+2. Ensure `API_TOKEN` matches the token that will be bundled with the Android client.
+3. Provide `OPENAI_API_KEY` to enable the `/action` and `/generate` endpoints. If the key
+   is omitted the server will still launch, but those endpoints will respond with a
+   descriptive error until the key is configured.
+4. If the machine hosting the FastAPI backend does not have GPU support, either leave
+   `EASYOCR_GPU` unset (the server will automatically fall back to CPU) or set it to `0`
+   explicitly in `.env`.
+
+The defaults in `.env.example` allow the backend to start immediately for local testing.
+
+---
+
+## Android application configuration & APK build
+
+1. Copy the Android configuration template (or merge its contents if you already
+   have a `local.properties` file with your Android SDK path):
+   ```bash
+   cp android/dekiautomata/local.properties.example android/dekiautomata/local.properties
+   ```
+2. Update `BASE_URL` to point at your deployed FastAPI backend. The default value
+   (`http://10.0.2.2:8000/`) works for local testing in an Android emulator while the
+   backend runs on the same machine.
+3. Update `API_TOKEN` so it matches the server's `.env` file.
+4. From `android/dekiautomata/`, build the APK:
+   ```bash
+   ./gradlew assembleRelease
+   ```
+   The signed artifact will be located in
+   `android/dekiautomata/app/build/outputs/apk/release/app-release-unsigned.apk`. Use your
+   preferred signing configuration or `assembleDebug` for quick local installs.
 
 ---
 
