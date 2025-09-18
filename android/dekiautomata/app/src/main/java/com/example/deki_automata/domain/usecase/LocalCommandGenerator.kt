@@ -67,6 +67,10 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
     @Volatile
     private var cachedLlmInference: LlmInference? = null
 
+    private val fallbackGemmaUrls = listOf(
+        "https://huggingface.co/google/gemma-3n-E4B-it-int4.task?download=true"
+    )
+
     private val modelDownloadClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
@@ -170,8 +174,8 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
                 return@withLock targetFile
             }
 
-            val downloadUrl = BuildConfig.GEMMA_MODEL_URL.trim()
-            if (downloadUrl.isEmpty()) {
+            val configuredUrl = BuildConfig.GEMMA_MODEL_URL.trim()
+            if (configuredUrl.isEmpty()) {
                 throw IllegalStateException(
                     "Gemma task file is missing at ${targetFile.absolutePath}. " +
                         "Set GEMMA_MODEL_URL in local.properties or sideload the model."
@@ -185,57 +189,70 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
                 }
             }
 
-            val tempFile = File(parentDir, "${targetFile.name}.download")
-            try {
-                if (tempFile.exists() && !tempFile.delete()) {
-                    tempFile.deleteOnExit()
-                }
-
-                val requestBuilder = Request.Builder().url(downloadUrl)
-                val authHeader = BuildConfig.GEMMA_MODEL_AUTHORIZATION.trim()
-                if (authHeader.isNotEmpty()) {
-                    requestBuilder.addHeader("Authorization", authHeader)
-                }
-
-                Log.i(TAG, "Downloading Gemma model from $downloadUrl ...")
-                modelDownloadClient.newCall(requestBuilder.build()).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        val hint = if (response.code == 401 || response.code == 403) {
-                            " Verify GEMMA_MODEL_AUTHORIZATION or the hosting permissions."
-                        } else ""
-                        throw IOException(
-                            "Failed to download Gemma model (${response.code} ${response.message}).$hint"
-                        )
-                    }
-
-                    val body = response.body ?: throw IOException("Gemma model download returned an empty response body")
-                    body.byteStream().use { inputStream ->
-                        FileOutputStream(tempFile).use { outputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
-                }
-
-                if (!tempFile.renameTo(targetFile)) {
-                    tempFile.inputStream().use { inputStream ->
-                        FileOutputStream(targetFile).use { outputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
-                    if (!tempFile.delete()) {
-                        tempFile.deleteOnExit()
-                    }
-                }
-
-                Log.i(TAG, "Gemma model saved to ${targetFile.absolutePath}")
-            } catch (e: Exception) {
-                if (tempFile.exists()) {
-                    tempFile.delete()
-                }
-                throw e
+            val authHeader = BuildConfig.GEMMA_MODEL_AUTHORIZATION.trim()
+            val candidateUrls = LinkedHashSet<String>().apply {
+                add(configuredUrl)
+                addAll(fallbackGemmaUrls)
             }
 
-            targetFile
+            var lastError: Exception? = null
+            for (candidateUrl in candidateUrls) {
+                val tempFile = File(parentDir, "${targetFile.name}.download")
+                try {
+                    if (tempFile.exists() && !tempFile.delete()) {
+                        tempFile.deleteOnExit()
+                    }
+
+                    val requestBuilder = Request.Builder().url(candidateUrl)
+                    if (authHeader.isNotEmpty()) {
+                        requestBuilder.addHeader("Authorization", authHeader)
+                    }
+
+                    Log.i(TAG, "Downloading Gemma model from $candidateUrl ...")
+                    modelDownloadClient.newCall(requestBuilder.build()).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            val hint = if (response.code == 401 || response.code == 403) {
+                                " Verify GEMMA_MODEL_AUTHORIZATION or the hosting permissions."
+                            } else ""
+                            throw IOException(
+                                "Failed to download Gemma model (${response.code} ${response.message}).$hint"
+                            )
+                        }
+
+                        val body = response.body
+                            ?: throw IOException("Gemma model download returned an empty response body")
+                        body.byteStream().use { inputStream ->
+                            FileOutputStream(tempFile).use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
+                    }
+
+                    if (!tempFile.renameTo(targetFile)) {
+                        tempFile.inputStream().use { inputStream ->
+                            FileOutputStream(targetFile).use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
+                        if (!tempFile.delete()) {
+                            tempFile.deleteOnExit()
+                        }
+                    }
+
+                    Log.i(TAG, "Gemma model saved to ${targetFile.absolutePath}")
+                    return@withLock targetFile
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "Gemma download from $candidateUrl failed", e)
+                    if (tempFile.exists()) {
+                        tempFile.delete()
+                    }
+                }
+            }
+
+            throw IllegalStateException(
+                "Unable to download Gemma model from any configured URL", lastError
+            )
         }
     }
 

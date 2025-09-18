@@ -120,7 +120,14 @@ The defaults in `.env.example` allow the backend to start immediately for local 
    (`http://10.0.2.2:8000/`) works for local testing in an Android emulator while the
    backend runs on the same machine.
 3. Update `API_TOKEN` so it matches the server's `.env` file.
-4. From `android/dekiautomata/`, build the APK:
+4. The Android app now bundles a default download URL for Google's Gemma 3 multimodal
+   task file. The `gemma-3n-E4B-it-int4.task` artifact is fetched from Hugging Face the
+   first time local mode runs and cached on the device automatically. The upstream
+   repository is gated, so set `GEMMA_MODEL_AUTHORIZATION=Bearer hf_your_token` in
+   `local.properties` if you have not already authenticated Hugging Face CLI access.
+   Self-hosted mirrors can override `GEMMA_MODEL_URL` (and optionally the authorization
+   header) as needed.
+5. From `android/dekiautomata/`, build the APK:
    ```bash
    ./gradlew assembleRelease
    ```

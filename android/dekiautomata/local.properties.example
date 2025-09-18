@@ -13,7 +13,7 @@ API_TOKEN=local_dev_token
 # Optional: direct download URL for the Gemma .task file used in local mode.
 # If left blank, the app will ask you to provide a URL before it can run
 # multimodal inference on-device.
-GEMMA_MODEL_URL=https://huggingface.co/orasul/deki-gemma-3n/resolve/main/gemma-3n-4b-it-int4.task?download=1
+GEMMA_MODEL_URL=https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task?download=true
 
 # Optional: Authorization header value used when downloading the Gemma model.
 # Set this to "Bearer hf_your_token" if the model host requires authentication.
