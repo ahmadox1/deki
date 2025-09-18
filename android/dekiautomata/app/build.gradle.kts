@@ -39,6 +39,16 @@ android {
         val defaultApiToken = "local_dev_token"
         val configuredToken = getLocalProperty("API_TOKEN", rootDir).ifBlank { defaultApiToken }
         buildConfigField("String", "API_TOKEN", "\"$configuredToken\"")
+
+        val configuredGemmaUrl = getLocalProperty("GEMMA_MODEL_URL", rootDir)
+        buildConfigField("String", "GEMMA_MODEL_URL", "\"${configuredGemmaUrl.replace("\"", "\\\"")}\"")
+
+        val configuredGemmaAuth = getLocalProperty("GEMMA_MODEL_AUTHORIZATION", rootDir)
+        buildConfigField(
+            "String",
+            "GEMMA_MODEL_AUTHORIZATION",
+            "\"${configuredGemmaAuth.replace("\"", "\\\"")}\""
+        )
     }
 
     buildTypes {

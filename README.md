@@ -393,36 +393,23 @@ Local Android AI agent runs YOLO, OCR, Image Processing and LLM fully locally on
 I made an example of how to do it, but if you want to use it in production you need to fine-tune
 LLM for this task.
 
-Download gemma3n-E4B-it-int4.taks or gemma3n-E2B-it-int4.taks from Kaggle (it is tensorflow lite version)
+The Android client can now fetch the Gemma `.task` file for you on the first run.
 
-Enable developer options on the phone -> Connect Android phone to your computer via USB ->
-Run Android app -> then run these commands:
+1. Copy `android/dekiautomata/local.properties.example` to `android/dekiautomata/local.properties`.
+2. Set `GEMMA_MODEL_URL` to a direct download link for `gemma-3n-4b-it-int4.task` (Kaggle, Hugging Face, GCS, etc.).
+3. If the host requires authentication, populate `GEMMA_MODEL_AUTHORIZATION` with the header value (for Hugging Face use `Bearer hf_xxx`).
+4. Build and run the app. When you switch to **Local Mode (On-Device)** the model will be downloaded into the app cache automatically.
 
-Check if your computer sees your device
+If you prefer to sideload the file manually you can:
+
 ```bash
 adb devices
-```
-Remove any LLM models from the app's cache folder:
-```bash
 adb shell "run-as com.example.deki_automata sh -c 'rm /data/data/com.example.deki_automata/cache/*'"
-```
-Copy the gemma3n to phone:
-```bash
-adb push ~/Downloads/gemma-3n-E4B-it-int4.task /data/local/tmp/temp_model_4b.task 
-```
-Copy the gemma3n from common storage to app's cache folder:
-```bash
-adb shell "run-as com.example.deki_automata cp /data/local/tmp/temp_model_4b.task /data/data/com.example.deki_automata/cache/gemma-3n-4b-it-int4.task"
-```
-Remove gemma3n from common folder:
-```bash
-adb shell "rm /data/local/tmp/temp_model_4b.task"
-```
-Check if gemma3n is in your app's cache folder:
-```bash
+adb push ~/Downloads/gemma-3n-4b-it-int4.task /data/local/tmp/temp_model.task
+adb shell "run-as com.example.deki_automata cp /data/local/tmp/temp_model.task /data/data/com.example.deki_automata/cache/gemma-3n-4b-it-int4.task"
+adb shell "rm /data/local/tmp/temp_model.task"
 adb shell "run-as com.example.deki_automata ls -l /data/data/com.example.deki_automata/cache"
 ```
-Then run the app.
 
 Check LocalCommandGenerator file in Android app to get the idea how everything works.
 
