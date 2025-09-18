@@ -1,0 +1,20 @@
+# Copy this file to android/dekiautomata/local.properties and adjust the values
+# before building the Android app.
+#
+# BASE_URL should point to the publicly accessible FastAPI backend.
+# When running the backend locally inside Android Studio's emulator,
+# keep the default value so that the emulator resolves to localhost.
+BASE_URL=http://10.0.2.2:8000/
+
+# API token used by the Android client. This must match the API_TOKEN
+# configured on the FastAPI backend (.env file).
+API_TOKEN=local_dev_token
+
+# Optional: direct download URL for the Gemma .task file used in local mode.
+# If left blank, the app will ask you to provide a URL before it can run
+# multimodal inference on-device.
+GEMMA_MODEL_URL=https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task?download=true
+
+# Optional: Authorization header value used when downloading the Gemma model.
+# Set this to "Bearer hf_your_token" if the model host requires authentication.
+GEMMA_MODEL_AUTHORIZATION=

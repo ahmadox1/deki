@@ -31,8 +31,31 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-        // TODO update
-        buildConfigField("String", "API_TOKEN", "\"${getLocalProperty("API_TOKEN", rootDir)}\"")
+        val defaultBaseUrl = "http://10.0.2.2:8000/"
+        val configuredBaseUrl = getLocalProperty("BASE_URL", rootDir).ifBlank { defaultBaseUrl }
+        val normalizedBaseUrl = if (configuredBaseUrl.endsWith("/")) configuredBaseUrl else "$configuredBaseUrl/"
+        buildConfigField("String", "BASE_URL", "\"$normalizedBaseUrl\"")
+
+        val defaultApiToken = "local_dev_token"
+        val configuredToken = getLocalProperty("API_TOKEN", rootDir).ifBlank { defaultApiToken }
+        buildConfigField("String", "API_TOKEN", "\"$configuredToken\"")
+
+        val defaultGemmaUrl =
+            "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task?download=true"
+        val configuredGemmaUrl =
+            getLocalProperty("GEMMA_MODEL_URL", rootDir).ifBlank { defaultGemmaUrl }
+        buildConfigField(
+            "String",
+            "GEMMA_MODEL_URL",
+            "\"${configuredGemmaUrl.replace("\"", "\\\"")}\""
+        )
+
+        val configuredGemmaAuth = getLocalProperty("GEMMA_MODEL_AUTHORIZATION", rootDir)
+        buildConfigField(
+            "String",
+            "GEMMA_MODEL_AUTHORIZATION",
+            "\"${configuredGemmaAuth.replace("\"", "\\\"")}\""
+        )
     }
 
     buildTypes {

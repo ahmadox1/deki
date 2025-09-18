@@ -83,11 +83,57 @@ And don't forget to include your HuggingFace and OpenAI tokens if you use blip2 
 Also, to use this version you need to install llama-3.2-11b via ollama.  
 (if you didn't pass --no-captioning)
 
-You can see an example of usage for the **code generation** (and for other things) 
+You can see an example of usage for the **code generation** (and for other things)
 in gradio section.
 
 If you want a production ready code generator or AI agent then fine-tune the model to get
 high quality results because the image description is quite long and complex.
+
+---
+
+## Backend configuration
+
+1. Copy the sample environment file and adjust it to your setup:
+   ```bash
+   cp .env.example .env
+   ```
+2. Ensure `API_TOKEN` matches the token that will be bundled with the Android client.
+3. Provide `OPENAI_API_KEY` to enable the `/action` and `/generate` endpoints. If the key
+   is omitted the server will still launch, but those endpoints will respond with a
+   descriptive error until the key is configured.
+4. If the machine hosting the FastAPI backend does not have GPU support, either leave
+   `EASYOCR_GPU` unset (the server will automatically fall back to CPU) or set it to `0`
+   explicitly in `.env`.
+
+The defaults in `.env.example` allow the backend to start immediately for local testing.
+
+---
+
+## Android application configuration & APK build
+
+1. Copy the Android configuration template (or merge its contents if you already
+   have a `local.properties` file with your Android SDK path):
+   ```bash
+   cp android/dekiautomata/local.properties.example android/dekiautomata/local.properties
+   ```
+2. Update `BASE_URL` to point at your deployed FastAPI backend. The default value
+   (`http://10.0.2.2:8000/`) works for local testing in an Android emulator while the
+   backend runs on the same machine.
+3. Update `API_TOKEN` so it matches the server's `.env` file.
+4. The Android app now bundles a default download URL for Google's Gemma 3 multimodal
+   task file. The `gemma-3n-E4B-it-int4.task` artifact is fetched from Hugging Face the
+   first time local mode runs and cached on the device automatically. The upstream
+   repository is gated, so set `GEMMA_MODEL_AUTHORIZATION=Bearer hf_your_token` in
+   `local.properties` if you have not already authenticated Hugging Face CLI access.
+   Self-hosted mirrors can override `GEMMA_MODEL_URL` (and optionally the authorization
+   header) as needed.
+5. From `android/dekiautomata/`, build the APK:
+   ```bash
+   ./gradlew assembleRelease
+   ```
+   The signed artifact will be located in
+   `android/dekiautomata/app/build/outputs/apk/release/app-release-unsigned.apk`. Use your
+   preferred signing configuration or `assembleDebug` for quick local installs.
 
 ---
 
@@ -354,36 +400,23 @@ Local Android AI agent runs YOLO, OCR, Image Processing and LLM fully locally on
 I made an example of how to do it, but if you want to use it in production you need to fine-tune
 LLM for this task.
 
-Download gemma3n-E4B-it-int4.taks or gemma3n-E2B-it-int4.taks from Kaggle (it is tensorflow lite version)
+The Android client can now fetch the Gemma `.task` file for you on the first run.
 
-Enable developer options on the phone -> Connect Android phone to your computer via USB ->
-Run Android app -> then run these commands:
+1. Copy `android/dekiautomata/local.properties.example` to `android/dekiautomata/local.properties`.
+2. Set `GEMMA_MODEL_URL` to a direct download link for `gemma-3n-4b-it-int4.task` (Kaggle, Hugging Face, GCS, etc.).
+3. If the host requires authentication, populate `GEMMA_MODEL_AUTHORIZATION` with the header value (for Hugging Face use `Bearer hf_xxx`).
+4. Build and run the app. When you switch to **Local Mode (On-Device)** the model will be downloaded into the app cache automatically.
 
-Check if your computer sees your device
+If you prefer to sideload the file manually you can:
+
 ```bash
 adb devices
-```
-Remove any LLM models from the app's cache folder:
-```bash
 adb shell "run-as com.example.deki_automata sh -c 'rm /data/data/com.example.deki_automata/cache/*'"
-```
-Copy the gemma3n to phone:
-```bash
-adb push ~/Downloads/gemma-3n-E4B-it-int4.task /data/local/tmp/temp_model_4b.task 
-```
-Copy the gemma3n from common storage to app's cache folder:
-```bash
-adb shell "run-as com.example.deki_automata cp /data/local/tmp/temp_model_4b.task /data/data/com.example.deki_automata/cache/gemma-3n-4b-it-int4.task"
-```
-Remove gemma3n from common folder:
-```bash
-adb shell "rm /data/local/tmp/temp_model_4b.task"
-```
-Check if gemma3n is in your app's cache folder:
-```bash
+adb push ~/Downloads/gemma-3n-4b-it-int4.task /data/local/tmp/temp_model.task
+adb shell "run-as com.example.deki_automata cp /data/local/tmp/temp_model.task /data/data/com.example.deki_automata/cache/gemma-3n-4b-it-int4.task"
+adb shell "rm /data/local/tmp/temp_model.task"
 adb shell "run-as com.example.deki_automata ls -l /data/data/com.example.deki_automata/cache"
 ```
-Then run the app.
 
 Check LocalCommandGenerator file in Android app to get the idea how everything works.
 

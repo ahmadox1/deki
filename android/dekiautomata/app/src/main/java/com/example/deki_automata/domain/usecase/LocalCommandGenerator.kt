@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.util.Base64
 import android.util.Log
 import com.example.deki_automata.data.model.ActionResponse
+import com.example.deki_automata.BuildConfig
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -15,6 +16,8 @@ import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,12 +31,17 @@ import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.ops.ResizeOp
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.PriorityQueue
 import kotlin.math.max
 import kotlin.math.min
 import androidx.core.graphics.scale
 import com.example.deki_automata.domain.model.DetectionResult
 import com.example.deki_automata.util.ImageDebugUtils
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 class LocalCommandGenerator(private val context: Context) : CommandGenerator {
     private companion object {
@@ -50,17 +58,26 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
 
     private val labels = listOf("View", "ImageView", "Text", "Line")
 
-    private val llmInference: LlmInference by lazy {
-        Log.d(TAG, "Initializing LlmInference Engine...")
-        val modelFile = File(context.cacheDir, GEMMA_TASK_FILE)
-        val modelPath = modelFile.absolutePath
-        val options = LlmInference.LlmInferenceOptions.builder()
-            .setModelPath(modelPath)
-            .setMaxNumImages(1)
-            .setMaxTokens(4096)
-            .setPreferredBackend(LlmInference.Backend.GPU)
+    private val gemmaModelFile: File
+        get() = File(context.cacheDir, GEMMA_TASK_FILE)
+
+    private val modelDownloadMutex = Mutex()
+    private val llmInitMutex = Mutex()
+
+    @Volatile
+    private var cachedLlmInference: LlmInference? = null
+
+    private val fallbackGemmaUrls = listOf(
+        "https://huggingface.co/google/gemma-3n-E4B-it-int4.task?download=true"
+    )
+
+    private val modelDownloadClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.MINUTES)
+            .writeTimeout(5, TimeUnit.MINUTES)
+            .callTimeout(10, TimeUnit.MINUTES)
             .build()
-        LlmInference.createFromOptions(context, options)
     }
 
     private val yoloInterpreter: Interpreter by lazy {
@@ -99,6 +116,8 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
             val gemmaPrompt = buildActionPrompt(prompt, imageDescriptionJson, history)
             Log.d(TAG, "\n\ngemmaPrompt: $gemmaPrompt \n\n")
 
+            val llm = getOrCreateLlmInference()
+
             var gemmaResponse = ""
             val llmTime = measureTimeMillis {
                 val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
@@ -110,7 +129,7 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
                     )
                     .build()
 
-                LlmInferenceSession.createFromOptions(llmInference, sessionOptions).use { session ->
+                LlmInferenceSession.createFromOptions(llm, sessionOptions).use { session ->
                     val mpImage = BitmapImageBuilder(markedUpBitmap).build()
                     session.addQueryChunk(gemmaPrompt)
                     session.addImage(mpImage)
@@ -129,6 +148,141 @@ class LocalCommandGenerator(private val context: Context) : CommandGenerator {
             Log.e(TAG, "Local command generation failed spectacularly", e)
             Result.failure(e)
         }
+    }
+
+    private suspend fun getOrCreateLlmInference(): LlmInference {
+        cachedLlmInference?.let { return it }
+
+        return llmInitMutex.withLock {
+            cachedLlmInference?.let { return it }
+
+            val modelFile = ensureGemmaModel()
+            val inference = createLlmInference(modelFile)
+            cachedLlmInference = inference
+            inference
+        }
+    }
+
+    private suspend fun ensureGemmaModel(): File {
+        val targetFile = gemmaModelFile
+        if (targetFile.exists()) {
+            return targetFile
+        }
+
+        return modelDownloadMutex.withLock {
+            if (targetFile.exists()) {
+                return@withLock targetFile
+            }
+
+            val configuredUrl = BuildConfig.GEMMA_MODEL_URL.trim()
+            if (configuredUrl.isEmpty()) {
+                throw IllegalStateException(
+                    "Gemma task file is missing at ${targetFile.absolutePath}. " +
+                        "Set GEMMA_MODEL_URL in local.properties or sideload the model."
+                )
+            }
+
+            val parentDir = targetFile.parentFile ?: context.cacheDir
+            if (!parentDir.exists()) {
+                if (!parentDir.mkdirs()) {
+                    throw IOException("Unable to create cache directory for Gemma model at ${parentDir.absolutePath}")
+                }
+            }
+
+            val authHeader = BuildConfig.GEMMA_MODEL_AUTHORIZATION.trim()
+            val candidateUrls = LinkedHashSet<String>().apply {
+                add(configuredUrl)
+                addAll(fallbackGemmaUrls)
+            }
+
+            var lastError: Exception? = null
+            for (candidateUrl in candidateUrls) {
+                val tempFile = File(parentDir, "${targetFile.name}.download")
+                try {
+                    if (tempFile.exists() && !tempFile.delete()) {
+                        tempFile.deleteOnExit()
+                    }
+
+                    val requestBuilder = Request.Builder().url(candidateUrl)
+                    if (authHeader.isNotEmpty()) {
+                        requestBuilder.addHeader("Authorization", authHeader)
+                    }
+
+                    Log.i(TAG, "Downloading Gemma model from $candidateUrl ...")
+                    modelDownloadClient.newCall(requestBuilder.build()).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            val hint = if (response.code == 401 || response.code == 403) {
+                                " Verify GEMMA_MODEL_AUTHORIZATION or the hosting permissions."
+                            } else ""
+                            throw IOException(
+                                "Failed to download Gemma model (${response.code} ${response.message}).$hint"
+                            )
+                        }
+
+                        val body = response.body
+                            ?: throw IOException("Gemma model download returned an empty response body")
+                        body.byteStream().use { inputStream ->
+                            FileOutputStream(tempFile).use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
+                    }
+
+                    if (!tempFile.renameTo(targetFile)) {
+                        tempFile.inputStream().use { inputStream ->
+                            FileOutputStream(targetFile).use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
+                        if (!tempFile.delete()) {
+                            tempFile.deleteOnExit()
+                        }
+                    }
+
+                    Log.i(TAG, "Gemma model saved to ${targetFile.absolutePath}")
+                    return@withLock targetFile
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "Gemma download from $candidateUrl failed", e)
+                    if (tempFile.exists()) {
+                        tempFile.delete()
+                    }
+                }
+            }
+
+            throw IllegalStateException(
+                "Unable to download Gemma model from any configured URL", lastError
+            )
+        }
+    }
+
+    private fun createLlmInference(modelFile: File): LlmInference {
+        val attemptedBackends = listOf(
+            LlmInference.Backend.GPU,
+            LlmInference.Backend.CPU,
+        )
+
+        var lastError: Throwable? = null
+        for (backend in attemptedBackends) {
+            try {
+                Log.d(TAG, "Initializing LlmInference Engine using $backend backend...")
+                val options = LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelFile.absolutePath)
+                    .setMaxNumImages(1)
+                    .setMaxTokens(4096)
+                    .setPreferredBackend(backend)
+                    .build()
+                return LlmInference.createFromOptions(context, options)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to initialize LlmInference on $backend backend", e)
+                lastError = e
+            }
+        }
+
+        throw IllegalStateException(
+            "Unable to initialize LlmInference engine with available backends",
+            lastError
+        )
     }
 
     private fun runYoloInference(originalBitmap: Bitmap): List<DetectionResult> {
