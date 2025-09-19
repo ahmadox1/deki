@@ -16,6 +16,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -59,6 +60,7 @@ class MainActivity : ComponentActivity() {
                 val currentState = viewModel.uiState.value
                 if (!currentState.isScreenCaptureReady && currentState.isAccessibilityEnabled) {
                     Log.d(TAG, "Auto-requesting MediaProjection permission after audio grant")
+                    Toast.makeText(this@MainActivity, "Requesting screen capture permission...", Toast.LENGTH_SHORT).show()
                     requestMediaProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
                 }
             }
@@ -117,6 +119,7 @@ class MainActivity : ComponentActivity() {
                 val currentState = viewModel.uiState.value
                 if (currentState.isAccessibilityEnabled && !currentState.isScreenCaptureReady) {
                     Log.d(TAG, "Accessibility enabled, auto-requesting MediaProjection permission")
+                    Toast.makeText(this@MainActivity, "Setting up screen capture...", Toast.LENGTH_SHORT).show()
                     requestMediaProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
                 }
             }, 1000) // 1 second delay to allow accessibility service to start
@@ -181,6 +184,7 @@ class MainActivity : ComponentActivity() {
             val currentState = viewModel.uiState.value
             if (currentState.isAccessibilityEnabled && !currentState.isScreenCaptureReady && currentState.isRecordAudioGranted) {
                 Log.d(TAG, "onResume: Auto-requesting MediaProjection permission")
+                Toast.makeText(this, "Setting up screen capture...", Toast.LENGTH_SHORT).show()
                 requestMediaProjectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
             }
         }, 500) // 500ms delay to allow state to update
